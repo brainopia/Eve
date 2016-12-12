@@ -161,10 +161,18 @@ export class Scan {
   }
 
 
-  _fullScanLookup(index, solving, results, resolved, solvingIx, ix, maxDepth) {
+  _fullScanLookup(index, solving, results, resolved, solvingIx, ix, maxDepth, parts) {
     if(index === undefined) return;
     if(ix === maxDepth) {
-      return results.push(solving.slice());
+      if(!parts) {
+        return results.push(solving.slice());
+      } else {
+        let result = [];
+        for(let partIx of parts) {
+          result.push(solving[partIx])
+        }
+        return results.push(result);
+      }
     }
     let value = resolved[ix];
     if(value === undefined) {
@@ -172,19 +180,44 @@ export class Scan {
       for(let key of Object.keys(curIndex)) {
         let v = curIndex[key];
         solving[solvingIx] = v.value !== undefined ? v.value : v;
-        this._fullScanLookup(v, solving, results, resolved, solvingIx + 1, ix + 1, maxDepth);
+        this._fullScanLookup(v, solving, results, resolved, solvingIx + 1, ix + 1, maxDepth, parts);
       }
     } else {
-      this._fullScanLookup(index.index[value], solving, results, resolved, solvingIx, ix + 1, maxDepth);
+      this._fullScanLookup(index.index[value], solving, results, resolved, solvingIx, ix + 1, maxDepth, parts);
     }
   }
 
   fullScan(index, resolved, results) {
     let [e,a,v,node] = resolved;
     let solving = [];
-    let solveNode = this.node !== undefined;
-    let depth = solveNode ? 4 : 3;
-    this._fullScanLookup(index.eavIndex, solving, results, resolved, 0, 0, depth);
+    let depth;
+    if(this.node !== undefined) {
+      depth = 4
+    } else if (this.v !== undefined) {
+      depth = 3
+    } else if (this.a !== undefined) {
+      depth = 2
+    } else {
+      depth = 1
+    }
+    let parts = [0,1,2,3];
+    if(this.node == undefined) {
+      parts.splice(3,1)
+    }
+    if(this.v == undefined) {
+      parts.splice(2,1)
+    }
+    if(this.a == undefined) {
+      parts.splice(1,1)
+    }
+    if(this.e == undefined) {
+      parts.splice(0,1)
+    }
+    if(parts.length == depth) {
+      parts = undefined
+    }
+
+    this._fullScanLookup(index.eavIndex, solving, results, resolved, 0, 0, depth, parts);
     return results;
   }
 
@@ -221,6 +254,7 @@ export class Scan {
     let [e,a,v,node] = resolved;
     const lookupType = this.toLookupType(resolved);
     let proposal = this.proposalObject;
+    let indexPos, indexVar;
     proposal.providing = undefined;
     proposal.indexType = undefined;
     proposal.cardinality = 0;
@@ -229,42 +263,53 @@ export class Scan {
       let curIndex = multiIndex.getIndex(scope);
       switch(lookupType) {
         case "e***":
-          this.setProposal(curIndex.eavIndex.lookup(e), this.a, scopeIx);
+          indexPos = curIndex.eavIndex.lookup(e)
+          indexVar = this.a
           break;
         case "ea**":
-          this.setProposal(curIndex.eavIndex.lookup(e,a), this.v, scopeIx);
+          indexPos = curIndex.eavIndex.lookup(e,a)
+          indexVar = this.v
           break;
         case "eav*":
-          this.setProposal(curIndex.eavIndex.lookup(e,a,v), this.node, scopeIx);
+          indexPos = curIndex.eavIndex.lookup(e,a,v)
+          indexVar = this.node
           break;
         case "*a**":
-          this.setProposal(curIndex.aveIndex.lookup(a), this.v, scopeIx);
+          indexPos = curIndex.aveIndex.lookup(a)
+          indexVar = this.v
           break;
         case "*av*":
-          this.setProposal(curIndex.aveIndex.lookup(a,v), this.e, scopeIx);
+          indexPos = curIndex.aveIndex.lookup(a,v)
+          indexVar = this.e
           break;
         case "***n":
-          this.setProposal(curIndex.neavIndex.lookup(node), this.e, scopeIx);
+          indexPos = curIndex.neavIndex.lookup(node)
+          indexVar = this.e
           break;
         case "e**n":
-          this.setProposal(curIndex.neavIndex.lookup(node,e), this.a, scopeIx);
+          indexPos = curIndex.neavIndex.lookup(node,e)
+          indexVar = this.a
           break;
         case "ea*n":
-          this.setProposal(curIndex.neavIndex.lookup(node,e,a), this.v, scopeIx);
+          indexPos = curIndex.neavIndex.lookup(node,e,a)
+          indexVar = this.v
           break;
-        default:
-          if(proposal.providing === undefined) {
-            let providing = proposal.providing = [];
-            if(e === undefined) providing.push(this.e);
-            if(a === undefined) providing.push(this.a);
-            if(v === undefined) providing.push(this.v);
-            if(node === undefined && this.node !== undefined) providing.push(this.node);
-          }
-          // full scan
-          proposal.index[scopeIx] = curIndex;
-          proposal.cardinality += curIndex.cardinalityEstimate;
-          proposal.indexType = "fullScan";
-          break;
+      }
+
+      if (indexVar) {
+        this.setProposal(indexPos, indexVar, scopeIx);
+      } else {
+        if(proposal.providing === undefined) {
+          let providing = proposal.providing = [];
+          if(e === undefined && this.e !== undefined) providing.push(this.e);
+          if(a === undefined && this.a !== undefined) providing.push(this.a);
+          if(v === undefined && this.v !== undefined) providing.push(this.v);
+          if(node === undefined && this.node !== undefined) providing.push(this.node);
+        }
+        // full scan
+        proposal.index[scopeIx] = curIndex;
+        proposal.cardinality += curIndex.cardinalityEstimate;
+        proposal.indexType = "fullScan";
       }
       scopeIx++;
     }
@@ -276,7 +321,10 @@ export class Scan {
     let resolved = this.resolve(prefix);
     let [e,a,v,node] = resolved;
     // if this scan is fully resolved, then there's no variable for us to propose
-    if(e !== undefined && a !== undefined && v !== undefined && (node !== undefined || this.node === undefined)) {
+    if((e !== undefined || this.e === undefined) &&
+       (a !== undefined || this.a === undefined) &&
+       (v !== undefined || this.v === undefined) &&
+       (node !== undefined || this.node === undefined)) {
       return;
     }
     return this.getProposal(tripleIndex, resolved);
