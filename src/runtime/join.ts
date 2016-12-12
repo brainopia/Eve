@@ -41,6 +41,8 @@ export class Variable {
   }
 }
 
+class HiddenVariable extends Variable { }
+
 export function isVariable(thing) {
   return thing instanceof Variable;
 }
@@ -133,11 +135,11 @@ export class Scan {
   constructor(id: string, e,a,v,node?,scopes?) {
     this.id = id;
     this.resolved = [];
-    this.eav = [e,a,v,node];
-    this.e = e;
-    this.a = a;
-    this.v = v;
+    this.e = e || new HiddenVariable(id + '_hidden_e');
+    this.a = a || new HiddenVariable(id + '_hidden_a');
+    this.v = v || new HiddenVariable(id + '_hidden_v');
     this.node = node;
+    this.eav = [this.e,this.a,this.v,this.node];
     this.proposalObject = {providing: null, index: [], cardinality: 0};
     this.scopes = scopes || ["session"];
 
@@ -276,7 +278,10 @@ export class Scan {
     let resolved = this.resolve(prefix);
     let [e,a,v,node] = resolved;
     // if this scan is fully resolved, then there's no variable for us to propose
-    if(e !== undefined && a !== undefined && v !== undefined && (node !== undefined || this.node === undefined)) {
+    if((e !== undefined || this.e instanceof HiddenVariable) &&
+       (a !== undefined || this.a instanceof HiddenVariable) &&
+       (v !== undefined || this.v instanceof HiddenVariable) &&
+       (node !== undefined || this.node === undefined)) {
       return;
     }
     return this.getProposal(tripleIndex, resolved);
@@ -770,7 +775,13 @@ function joinRound(multiIndex: MultiIndex, providers: ProposalProvider[], prefix
   if(providingOne) {
     providing = [providing];
   }
-  let providingLength = providing.length;
+  let providingLength = 0;
+  for (let currentProvide of providing) {
+    if (!(currentProvide instanceof HiddenVariable)) {
+      providingLength++
+    }
+  }
+
   for(let value of values) {
     // Set the current value in our prefix of solved variables
     let providingIx = 0;

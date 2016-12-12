@@ -1928,6 +1928,39 @@ test("lookup with bound attribute", (assert) => {
   assert.end();
 })
 
+test("lookup with missing value", (assert) => {
+  let expected = {
+    insert: [
+      ["a", "tag", "person"],
+      ["a", "name", "chris"],
+      ["b", "tag", "result"],
+      ["b", "record", "a"],
+      ["b", "attribute", "tag"],
+      ["c", "tag", "result"],
+      ["c", "record", "a"],
+      ["c", "attribute", "name"]
+    ],
+    remove: []
+  };
+  evaluate(assert, expected, `
+    prepare data
+    ~~~
+      commit
+        [#person name: "chris"]
+    ~~~
+
+    test
+    ~~~
+      search
+        lookup[record attribute]
+        not(record.tag = "result")
+      commit
+        [#result record attribute]
+    ~~~
+  `);
+  assert.end();
+})
+
 test("lookup with free attribute, node and bound value", (assert) => {
   let expected = {
     insert: [
